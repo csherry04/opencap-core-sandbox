@@ -16,6 +16,7 @@ import traceback
 import logging
 logging.basicConfig(level=logging.INFO)
 
+from camera_assignment import detect_and_optionally_fix_full_camera_swap
 from utils import importMetadata, loadCameraParameters, getVideoExtension
 from utils import getDataDirectory, getOpenPoseDirectory, getMMposeDirectory
 from utilsChecker import saveCameraParameters
@@ -43,7 +44,9 @@ def main(sessionName, trialName, trial_id, cameras_to_use=['all'],
          dataDir=None, overwriteAugmenterModel=False,
          filter_frequency='default', overwriteFilterFrequency=False,
          scaling_setup='upright_standing_pose', overwriteScalingSetup=False,
-         overwriteCamerasToUse=False, syncVer=None,):
+         overwriteCamerasToUse=False, syncVer=None,
+         checkCameraAssignment=False,
+         autoCorrectCameraAssignment=False,):
 
     # %% High-level settings.
     # Camera calibration.
@@ -357,6 +360,19 @@ def main(sessionName, trialName, trial_id, cameras_to_use=['all'],
         if camerasToUse_c[0] != 'all' and len(camerasToUse_c) < 2:
             exception = 'At least two videos are required for 3D reconstruction, video upload likely failed for one or more cameras.'
             raise Exception(exception, exception)
+
+        auto_camera_assignment_guard = (
+            poseDetector == 'OpenPose'
+            and len(camerasToUse_c) == 2
+            and not checkCameraAssignment
+            and not autoCorrectCameraAssignment
+        )
+        if auto_camera_assignment_guard:
+            checkCameraAssignment = True
+            autoCorrectCameraAssignment = True
+            logging.info(
+                "Automatically enabling camera assignment correction for 2-camera OpenPose processing."
+            )
             
         # For neutral, we do not allow reprocessing with not all cameras.
         # The reason is that it affects extrinsics selection, and then you can only process
@@ -410,6 +426,33 @@ def main(sessionName, trialName, trial_id, cameras_to_use=['all'],
                     data collection and https://www.opencap.ai/troubleshooting for 
                     potential causes for a failed trial."""
                 raise Exception(exception, traceback.format_exc())
+
+        if checkCameraAssignment:
+            assignment_check = detect_and_optionally_fix_full_camera_swap(
+                CamParamDict,
+                keypoints2D,
+                confidence,
+                cams_to_use=cameras2Use,
+                auto_fix=autoCorrectCameraAssignment,
+            )
+            logging.info(
+                "Camera assignment sanity check for %s: original reprojection error=%.4f, swapped reprojection error=%.4f",
+                trialName,
+                assignment_check['original_error'],
+                assignment_check['swapped_error'],
+            )
+            if assignment_check['swap_is_better']:
+                logging.warning(
+                    "Detected lower reprojection error after swapping %s and %s.",
+                    assignment_check['ordered_cams'][0],
+                    assignment_check['ordered_cams'][1],
+                )
+                if autoCorrectCameraAssignment:
+                    logging.warning(
+                        "Auto-correcting synchronized keypoint assignment before triangulation."
+                    )
+                    keypoints2D = assignment_check['keypoint_dict']
+                    confidence = assignment_check['confidence_dict']
                 
     # Note: this should not be necessary, because we prevent reprocessing the neutral trial
     # with not all cameras, but keeping it in there in case we would want to.

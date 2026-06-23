@@ -1,0 +1,23 @@
+# macOS/Apple Silicon runtime dependencies.
+#
+# The default requirements.txt is Windows/Docker oriented and pins
+# tensorflow-gpu, which is not available on macOS.
+opencv-python
+pyyaml
+tensorflow-macos==2.12.0
+tensorflow-metal
+scipy
+pandas
+matplotlib
+ipython
+regex
+maskpass
+python-decouple
+protobuf<4
+scikit-learn
+pingouin==0.5.2
+openpyxl
+ffmpeg-python
+psutil
+boto3
+pytest

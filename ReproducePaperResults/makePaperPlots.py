@@ -833,7 +833,7 @@ np.random.seed(2)
 xRand = np.random.uniform(low=0, high=0,size=int(len(inData[0])/2))
 xRand = np.concatenate((xRand,-xRand))
 for x,y in zip(xPos,inData):
-    plt.plot(x+xRand,y,'ko',mfc='none',markerSize=2.2,mew=.25)
+    plt.plot(x+xRand,y,'ko',mfc='none',markersize=2.2,mew=.25)
 plt.plot([-3,3],[0,0],color = 'k',lw=1)
 
 plt.xlim([.5,2.5])
@@ -1005,7 +1005,7 @@ np.random.seed(2)
 xRand = np.random.uniform(low=0, high=0,size=int(len(inData[0])/2))
 xRand = np.concatenate((xRand,-xRand))
 for x,y in zip(xPos,inData):
-    plt.plot(x+xRand,y,'ko',mfc='none',markerSize=2.2,mew=.25)
+    plt.plot(x+xRand,y,'ko',mfc='none',markersize=2.2,mew=.25)
   
 
 plt.legend(barH,['Mocap', 'OpenCap'],frameon=False,fontsize='small',

@@ -42,7 +42,10 @@ https://app.opencap.ai/session/23d52d41-69fe-47cf-8b60-838e4268dd50
 
 import os
 import sys
-sys.path.append(os.path.abspath('./..'))
+
+repoDir = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '../'))
+sys.path.append(repoDir)
 
 from utilsServer import batchReprocess
 from utilsAPI import getAPIURL
@@ -55,7 +58,7 @@ API_TOKEN = getToken()
 # Enter the identifier(s) of the session(s) you want to reprocess. This is a list of one
 # or more session identifiers. The identifier is found as the 36-character string at the
 # end of the session url: app.opencap.ai/session/<session_id>
-session_ids = ['23d52d41-69fe-47cf-8b60-838e4268dd50']
+session_ids = ['5324ad5a-f714-437a-a546-470aaf8c03c0']
 
 # Select which trials to reprocess. You can reprocess all trials in the session 
 # by entering None in all fields below. The correct calibration and static
@@ -66,9 +69,9 @@ session_ids = ['23d52d41-69fe-47cf-8b60-838e4268dd50']
 # select specific trials. Only one trial (str) is allowed for calib_id and
 # static_id. A list of strings is allowed for dynamic_trialNames.
 
-calib_id = [] # None (auto-selected trial), [] (skip), or string of specific trial_id
-static_id = [] # None (auto-selected trial), [] (skip), or string of specific trial_id
-dynamic_trialNames = None # None (all dynamic trials), [] (skip), or list of trial names
+calib_id = None # None (auto-selected trial), [] (skip), or string of specific trial_id
+static_id = None # None (auto-selected trial), [] (skip), or string of specific trial_id
+dynamic_trialNames = ['jump'] # None (all dynamic trials), [] (skip), or list of trial names
 
 # Select which pose estimation model to use; options are 'OpenPose' and 'hrnet'.
 # If the same pose estimation model was used when collecting data with the web
@@ -97,7 +100,7 @@ poseDetector = 'OpenPose'
 #   - '1x1008_4scales': 1x1008 resolution with 4 scales (gap = 0.25). (we were only able to run with a GPU with 24GB memory)
 #       - This is the highest resolution/settings we could use with a 24GB
 #         GPU without running into memory issues.
-resolutionPoseDetection = '1x736'
+resolutionPoseDetection = 'default'
 
 
 # Set deleteLocalFolder to False to keep a local copy of the data. If you are 

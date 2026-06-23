@@ -13,6 +13,7 @@ import subprocess
 import zipfile
 import time
 import datetime
+import logging
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,16 @@ from utilsAPI import getAPIURL
 
 API_URL = getAPIURL()
 API_TOKEN = getToken()
+
+MAPPING_CACHE_DIRS = [
+    'Videos',
+    'MarkerData',
+    'OpenSimData',
+    'NeutralPoseImages',
+    'VisualizerJsons',
+    'VisualizerVideos',
+    'CalibrationImages',
+]
 
 #%% Rest of utils
 
@@ -54,6 +65,9 @@ def getDataDirectory(isDocker=False):
 
 def getOpenPoseDirectory(isDocker=False):
     computername = os.environ.get('COMPUTERNAME', None)
+    openPoseDirectoryEnv = os.environ.get('OPENPOSE_DIR')
+    if openPoseDirectoryEnv:
+        return openPoseDirectoryEnv
     
     # Paths to OpenPose folder for local testing.
     if computername == "DESKTOP-0UPR1OH":
@@ -99,6 +113,68 @@ def importMetadata(filePath):
     
     return parsedYamlFile
 
+
+def normalize_device_id(device_id):
+    return device_id.replace('-', '').upper()
+
+
+def get_mapping_path(session_path):
+    return os.path.join(session_path, 'Videos', 'mappingCamDevice.pickle')
+
+
+def load_mapping_file(mapping_path):
+    with open(mapping_path, 'rb') as handle:
+        return pickle.load(handle)
+
+
+def save_mapping_file(mapping_path, mapping):
+    os.makedirs(os.path.dirname(mapping_path), exist_ok=True)
+    with open(mapping_path, 'wb') as handle:
+        pickle.dump(mapping, handle)
+
+
+def build_mapping_from_trial_videos(trial_videos):
+    return {
+        normalize_device_id(video['device_id']): idx
+        for idx, video in enumerate(trial_videos)
+    }
+
+
+def build_iphone_model_mapping(trial_videos, mapping_cam_device):
+    iphone_model = {}
+    for video in trial_videos:
+        device_id = normalize_device_id(video['device_id'])
+        cam_idx = mapping_cam_device[device_id]
+        iphone_model[f'Cam{cam_idx}'] = video['parameters']['model']
+    return dict(sorted(iphone_model.items(), key=lambda item: item[0]))
+
+
+def reset_session_cache_for_mapping_drift(session_path):
+    for relative_path in MAPPING_CACHE_DIRS:
+        full_path = os.path.join(session_path, relative_path)
+        if os.path.isdir(full_path):
+            shutil.rmtree(full_path)
+        elif os.path.exists(full_path):
+            os.remove(full_path)
+
+    metadata_path = os.path.join(session_path, 'sessionMetadata.yaml')
+    if os.path.exists(metadata_path):
+        os.remove(metadata_path)
+
+
+def reconcile_camera_mapping(session_path, new_mapping):
+    mapping_path = get_mapping_path(session_path)
+    if os.path.exists(mapping_path):
+        existing_mapping = load_mapping_file(mapping_path)
+        if existing_mapping != new_mapping:
+            logging.warning(
+                "Detected local camera-mapping drift for %s. "
+                "Clearing mapping-dependent session cache before continuing.",
+                session_path,
+            )
+            reset_session_cache_for_mapping_drift(session_path)
+    save_mapping_file(mapping_path, new_mapping)
+        
 def download_file(url, file_name):
     with urllib.request.urlopen(url) as response, open(file_name, 'wb') as out_file:
         shutil.copyfileobj(response, out_file)
@@ -224,20 +300,19 @@ def downloadVideosFromServer(session_id,trial_id, isDocker=True,
     # the order during the first trial processed in the session such that we
     # can use the same order for the other trials.
     if not benchmark:
-        if not os.path.exists(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle')):
+        mapping_path = get_mapping_path(session_path)
+        if not os.path.exists(mapping_path):
             mappingCamDevice = {}
             for k, video in enumerate(trial["videos"]):
                 os.makedirs(os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name), exist_ok=True)
                 video_path = os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name, trial_id + ".mov")
                 download_file(video["video"], video_path)                
-                mappingCamDevice[video["device_id"].replace('-', '').upper()] = k
-            with open(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle'), 'wb') as handle:
-                pickle.dump(mappingCamDevice, handle)
+                mappingCamDevice[normalize_device_id(video["device_id"])] = k
+            save_mapping_file(mapping_path, mappingCamDevice)
         else:
-            with open(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle'), 'rb') as handle:
-                mappingCamDevice = pickle.load(handle)            
+            mappingCamDevice = load_mapping_file(mapping_path)
             for video in trial["videos"]:            
-                k = mappingCamDevice[video["device_id"].replace('-', '').upper()] 
+                k = mappingCamDevice[normalize_device_id(video["device_id"])]
                 videoDir = os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name)
                 os.makedirs(videoDir, exist_ok=True)
                 video_path = os.path.join(videoDir, trial_id + ".mov")
@@ -254,10 +329,9 @@ def downloadVideosFromServer(session_id,trial_id, isDocker=True,
                 session_desc = getMetadataFromServer(session_id)      
                 
             # Load iPhone models.
-            phoneModel= []
-            for i,video in enumerate(trial["videos"]):    
-                phoneModel.append(video['parameters']['model'])
-            session_desc['iphoneModel'] = {'Cam' + str(i) : phoneModel[i] for i in range(len(phoneModel))}
+            session_desc['iphoneModel'] = build_iphone_model_mapping(
+                trial["videos"], mappingCamDevice
+            )
         
             # Save metadata.
             with open(sessionYamlPath, 'w') as file:
@@ -562,8 +636,12 @@ def getCalibration(session_id,session_path,trial_type='dynamic',getCalibrationOp
     videoFolder = os.path.join(session_path,'Videos')
     os.makedirs(videoFolder, exist_ok=True)
     mapURL = trial['results'][calibResultTags.index('camera_mapping')]['media']
-    mapLocalPath = os.path.join(videoFolder,'mappingCamDevice.pickle')
-    download_file(mapURL,mapLocalPath)
+    mapTempPath = os.path.join(videoFolder,'mappingCamDevice.tmp.pickle')
+    download_file(mapURL, mapTempPath)
+    server_mapping = load_mapping_file(mapTempPath)
+    reconcile_camera_mapping(session_path, server_mapping)
+    if os.path.exists(mapTempPath):
+        os.remove(mapTempPath)
     
     # download calibration parameters and switch if necessary.
     calibrationOptions = downloadAndSwitchCalibrationFromDjango(session_id,session_path,
@@ -1803,4 +1881,3 @@ def makeRequestWithRetry(method, url,
                                     files=files)
     response.raise_for_status()
     return response
-

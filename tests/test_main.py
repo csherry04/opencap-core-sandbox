@@ -7,8 +7,10 @@ import pytest
 
 thisDir = os.path.dirname(os.path.realpath(__file__))
 repoDir = os.path.abspath(os.path.join(thisDir, '../'))
+sourceTestDataDir = os.path.join(thisDir, 'opencap-test-data')
 sys.path.append(repoDir)
 from main import main
+
 
 # Helper functions to load and compare TRC and MOT files
 def load_trc(file, num_metadata_lines=5):
@@ -74,6 +76,11 @@ def compare_mot(output_mot_df, ref_mot_df, t0, tf):
             rmse = calc_rmse(output_mot_df_slice[col], ref_mot_df_slice[col])
             assert rmse <= 0.5
 
+
+def assert_series_or_frame_equal(output_df, ref_df, atol):
+    pd.testing.assert_index_equal(output_df.columns, ref_df.columns)
+    pd.testing.assert_frame_equal(output_df, ref_df, check_exact=False, atol=atol)
+
 # End to end tests with different sync methods (hand, gait, general).
 # Also check that syncVer updates with main changes.
 # Note: no pose detection, uses pre-scaled opensim model
@@ -83,65 +90,138 @@ def compare_mot(output_mot_df, ref_mot_df, t0, tf):
     ('squats', 3.0, 8.0),
     ('walk', 1.0, 5.0),
 ])
-def test_main(trialName, t0, tf, syncVer, caplog):
+def test_main(trialName, t0, tf, syncVer, caplog, test_data_dir):
     caplog.set_level(logging.INFO)
 
     sessionName = 'sync_2-cameras'
     trialID = trialName
-    dataDir = os.path.join(thisDir, 'opencap-test-data')
-    main(
-        sessionName,
-        trialName,
-        trialID,
-        dataDir=dataDir,
-        genericFolderNames=True,
-        poseDetector='hrnet',
-        syncVer=syncVer,
-    )
-    assert f"Synchronizing Keypoints using version {syncVer}" in caplog.text
+    dataDir = test_data_dir
+    try:
+        main(
+            sessionName,
+            trialName,
+            trialID,
+            dataDir=dataDir,
+            genericFolderNames=True,
+            poseDetector='hrnet',
+            syncVer=syncVer,
+        )
+        assert f"Synchronizing Keypoints using version {syncVer}" in caplog.text
 
-    # Compare marker data
-    output_trc = os.path.join(dataDir,
-        'Data',
-        sessionName,
-        'MarkerData',
-        'PostAugmentation',
-        f'{trialName}.trc',
-    )
-    ref_trc = os.path.join(
-        dataDir,
-        'Data',
-        sessionName,
-        'OutputReference',
-        f'{trialName}.trc',
-    )
-    output_trc_df, _ = load_trc(output_trc)
-    ref_trc_df, _ = load_trc(ref_trc)
-    pd.testing.assert_frame_equal(
-        output_trc_df, ref_trc_df, check_exact=False, atol=1e-3
-    )
+        # Compare marker data
+        output_trc = os.path.join(dataDir,
+            'Data',
+            sessionName,
+            'MarkerData',
+            'PostAugmentation',
+            f'{trialName}.trc',
+        )
+        ref_trc = os.path.join(
+            dataDir,
+            'Data',
+            sessionName,
+            'OutputReference',
+            f'{trialName}.trc',
+        )
+        output_trc_df, _ = load_trc(output_trc)
+        ref_trc_df, _ = load_trc(ref_trc)
+        pd.testing.assert_frame_equal(
+            output_trc_df, ref_trc_df, check_exact=False, atol=1e-3
+        )
 
-    # Compare IK data
-    output_mot = os.path.join(
-        dataDir,
-        'Data',
-        sessionName,
-        'OpenSimData',
-        'Kinematics',
-        f'{trialName}.mot',
-    )
-    ref_mot = os.path.join(
-        dataDir,
-        'Data',
-        sessionName,
-        'OutputReference',
-        f'{trialName}.mot',
-    )
-    output_mot_df, _ = load_mot(output_mot)
-    ref_mot_df, _ = load_mot(ref_mot)
-    pd.testing.assert_index_equal(output_mot_df.columns, ref_mot_df.columns)
-    compare_mot(output_mot_df, ref_mot_df, t0, tf)
+        # Compare IK data
+        output_mot = os.path.join(
+            dataDir,
+            'Data',
+            sessionName,
+            'OpenSimData',
+            'Kinematics',
+            f'{trialName}.mot',
+        )
+        ref_mot = os.path.join(
+            dataDir,
+            'Data',
+            sessionName,
+            'OutputReference',
+            f'{trialName}.mot',
+        )
+        output_mot_df, _ = load_mot(output_mot)
+        ref_mot_df, _ = load_mot(ref_mot)
+        pd.testing.assert_index_equal(output_mot_df.columns, ref_mot_df.columns)
+        compare_mot(output_mot_df, ref_mot_df, t0, tf)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}\nTemp test data directory: {dataDir}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Temp test data directory: {dataDir}") from exc
 
-# TODO: calibration and neutral
+def test_main_neutral_scaling_regression(caplog, test_data_dir):
+    caplog.set_level(logging.INFO)
+
+    sessionName = 'sync_2-cameras'
+    trialName = 'neutral'
+    trialID = trialName
+    dataDir = test_data_dir
+
+    try:
+        main(
+            sessionName,
+            trialName,
+            trialID,
+            dataDir=dataDir,
+            genericFolderNames=False,
+            poseDetector='OpenPose',
+            resolutionPoseDetection='default',
+            scaleModel=True,
+        )
+        assert 'Running Scaling' in caplog.text
+
+        output_trc = os.path.join(
+            dataDir,
+            'Data',
+            sessionName,
+            'MarkerData',
+            'OpenPose_default',
+            'PostAugmentation_v0.3',
+            'neutral_LSTM.trc',
+        )
+        ref_trc = os.path.join(
+            sourceTestDataDir,
+            'Data',
+            sessionName,
+            'MarkerData',
+            'OpenPose_default',
+            'PostAugmentation_v0.3',
+            'neutral_LSTM.trc',
+        )
+        output_trc_df, _ = load_trc(output_trc)
+        ref_trc_df, _ = load_trc(ref_trc)
+        assert_series_or_frame_equal(output_trc_df, ref_trc_df, atol=1e-3)
+
+        output_scale_mot = os.path.join(
+            dataDir,
+            'Data',
+            sessionName,
+            'OpenSimData',
+            'OpenPose_default',
+            'Model',
+            'LaiUhlrich2022_scaled.mot',
+        )
+        ref_scale_mot = os.path.join(
+            sourceTestDataDir,
+            'Data',
+            sessionName,
+            'OpenSimData',
+            'OpenPose_default',
+            'Model',
+            'LaiUhlrich2022_scaled.mot',
+        )
+        output_scale_mot_df, _ = load_mot(output_scale_mot)
+        ref_scale_mot_df, _ = load_mot(ref_scale_mot)
+        assert_series_or_frame_equal(output_scale_mot_df, ref_scale_mot_df, atol=1e-6)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}\nTemp test data directory: {dataDir}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Temp test data directory: {dataDir}") from exc
+
 # TODO: > 2 cameras
 # TODO: augmenter versions

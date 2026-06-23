@@ -8,7 +8,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.interpolate import pchip_interpolate
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import butter, gaussian, find_peaks, sosfiltfilt
+from scipy.signal import butter, find_peaks, sosfiltfilt
+try:
+    from scipy.signal import gaussian
+except ImportError:
+    from scipy.signal.windows import gaussian
 from scipy import signal
 import scipy.linalg
 

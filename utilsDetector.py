@@ -4,6 +4,7 @@ import shutil
 import pickle
 import numpy as np
 import json
+import shlex
 import sys
 import time
 
@@ -229,7 +230,17 @@ def runOpenPoseCMD(pathOpenPose, resolutionPoseDetection, cameraDirectory,
         os.chdir(pathOpenPose)
         pathVideoOut = os.path.join(pathOutputVideo,
                                     trialPrefix + 'withKeypoints.avi')
-        if not generateVideo:
+        openposeBin = os.path.join(pathOpenPose, 'build', 'examples',
+                                   'openpose', 'openpose.bin')
+        if os.path.exists(openposeBin):
+            renderPose = 1 if generateVideo else 0
+            command = '{} --video {} --write_json {} --render_threshold 0.5 --display 0 --render_pose {} --model_pose BODY_25 --model_folder {}{}'.format(
+                shlex.quote(openposeBin), shlex.quote(videoFullPath),
+                shlex.quote(pathOutputJsons), renderPose,
+                shlex.quote(os.path.join(pathOpenPose, 'models')), cmd_hr)
+            if generateVideo:
+                command += ' --write_video {}'.format(shlex.quote(pathVideoOut))
+        elif not generateVideo:
             command = ('bin\OpenPoseDemo.exe --video {} --write_json {} --render_threshold 0.5 --display 0 --render_pose 0{}'.format(
                 videoFullPath, pathOutputJsons, cmd_hr))
         else:

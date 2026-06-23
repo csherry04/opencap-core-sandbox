@@ -58,6 +58,7 @@ sys.path.append(repoDir)
 
 from main import main
 from utils import importMetadata
+from camera_routing import select_camera_setup_for_trial, select_cameras_for_trial
 
 # %% User inputs
 # Enter the path to the folder where you downloaded the data. The data is on
@@ -66,22 +67,27 @@ from utils import importMetadata
 #   C:/Users/opencap/Documents/LabValidation_withVideos/subject2
 #   C:/Users/opencap/Documents/LabValidation_withVideos/subject3
 #   ...
-dataDir = 'C:/Users/opencap/Documents/LabValidation_withVideos/'
+dataDir = '/Users/callumsherry/opencap-sandboxes/opencap-core-sandbox/Data/LabValidation/'
 
 # The dataset includes 2 sessions per subject.The first session includes
 # static, sit-to-stand, squat, and drop jump trials. The second session 
 # includes walking trials. The sessions are named <subject_name>_Session0 and 
 # <subject_name>_Session1.
-sessionNames = ['subject2_Session0', 'subject2_Session1',
-                'subject3_Session0', 'subject3_Session1',
-                'subject4_Session0', 'subject4_Session1',
-                'subject5_Session0', 'subject5_Session1', 
-                'subject6_Session0', 'subject6_Session1',
-                'subject7_Session0', 'subject7_Session1', 
-                'subject8_Session0', 'subject8_Session1', 
-                'subject9_Session0', 'subject9_Session1', 
-                'subject10_Session0', 'subject10_Session1', 
-                'subject11_Session0', 'subject11_Session1']
+# Smoke test: run one local lab-validation session before launching the full
+# paper batch.
+sessionNames = ['subject2_Session0']
+
+# Full paper batch:
+# sessionNames = ['subject2_Session0', 'subject2_Session1',
+#                 'subject3_Session0', 'subject3_Session1',
+#                 'subject4_Session0', 'subject4_Session1',
+#                 'subject5_Session0', 'subject5_Session1',
+#                 'subject6_Session0', 'subject6_Session1',
+#                 'subject7_Session0', 'subject7_Session1',
+#                 'subject8_Session0', 'subject8_Session1',
+#                 'subject9_Session0', 'subject9_Session1',
+#                 'subject10_Session0', 'subject10_Session1',
+#                 'subject11_Session0', 'subject11_Session1']
 
 # We only support OpenPose on Windows.
 poseDetectors = ['OpenPose']
@@ -106,7 +112,7 @@ augmenter_model = 'v0.2'
 # once as long as the variable overwriteRestructuring is False. To overwrite
 # flip the flag to True.
 overwriteRestructuring = False
-subjects = ['subject' + str(i) for i in range(2,12)]
+subjects = sorted({sessionName.split('_')[0] for sessionName in sessionNames})
 for subject in subjects:
     pathSubject = os.path.join(dataDir, subject)
     pathVideos = os.path.join(pathSubject, 'VideoData')    
@@ -156,6 +162,27 @@ for subject in subjects:
 cam2sUse = {'5-cameras': ['Cam0', 'Cam1', 'Cam2', 'Cam3', 'Cam4'], 
             '3-cameras': ['Cam1', 'Cam2', 'Cam3'], 
             '2-cameras': ['Cam1', 'Cam3']}
+fullCameraSetup = max(cam2sUse, key=lambda setup: len(cam2sUse[setup]))
+
+
+def copy_model_files(source_model_dir, target_model_dir):
+    os.makedirs(target_model_dir, exist_ok=True)
+    for file in os.listdir(source_model_dir):
+        shutil.copy2(
+            os.path.join(source_model_dir, file),
+            os.path.join(target_model_dir, file))
+
+
+def copy_model_folder(data_dir, session_name, pose_detector,
+                      resolution_pose_detection, source_camera_setup,
+                      target_camera_setup):
+    session_dir = os.path.join(data_dir, 'Data', session_name)
+    open_sim_base = os.path.join(
+        session_dir, 'OpenSimData',
+        pose_detector + '_' + resolution_pose_detection)
+    source_model_dir = os.path.join(open_sim_base, source_camera_setup, 'Model')
+    target_model_dir = os.path.join(open_sim_base, target_camera_setup, 'Model')
+    copy_model_files(source_model_dir, target_model_dir)
 
 # # %% Functions for re-processing the data.
 def process_trial(trial_name=None, session_name=None, isDocker=False,
@@ -209,8 +236,6 @@ for count, sessionName in enumerate(sessionNames):
     
     for poseDetector in poseDetectors:
         for cameraSetup in cameraSetups:
-            cam2Use = cam2sUse[cameraSetup]
-            
             # The second sessions (<>_1) have no static trial for scaling the
             # model. The static trials were collected as part of the first
             # session for each subject (<>_0). We here copy the Model folder
@@ -218,19 +243,15 @@ for count, sessionName in enumerate(sessionNames):
             if sessionName[-1] == '1':
                 sessionDir = os.path.join(dataDir, 'Data', sessionName)
                 sessionDir_0 = sessionDir[:-1] + '0'
-                camDir_0 = os.path.join(
-                    sessionDir_0, 'OpenSimData', 
-                    poseDetector + '_' + resolutionPoseDetection, cameraSetup)
-                modelDir_0 = os.path.join(camDir_0, 'Model')
-                camDir_1 = os.path.join(
-                    sessionDir, 'OpenSimData', 
-                    poseDetector + '_' + resolutionPoseDetection, cameraSetup)
-                modelDir_1 = os.path.join(camDir_1, 'Model')
-                os.makedirs(modelDir_1, exist_ok=True)
-                for file in os.listdir(modelDir_0):
-                    pathFile = os.path.join(modelDir_0, file)
-                    pathFileEnd = os.path.join(modelDir_1, file)
-                    shutil.copy2(pathFile, pathFileEnd)
+                modelDir_0 = os.path.join(
+                    sessionDir_0, 'OpenSimData',
+                    poseDetector + '_' + resolutionPoseDetection, cameraSetup,
+                    'Model')
+                modelDir_1 = os.path.join(
+                    sessionDir, 'OpenSimData',
+                    poseDetector + '_' + resolutionPoseDetection, cameraSetup,
+                    'Model')
+                copy_model_files(modelDir_0, modelDir_1)
                     
             # Process trial.
             for trial in trials:                
@@ -247,6 +268,17 @@ for count, sessionName in enumerate(sessionNames):
                     scaleModel = True
                 else:
                     scaleModel = False
+
+                # Static/neutral scaling requires all recorded cameras in
+                # main.py. Dynamic trials can use the selected subset.
+                trialCameraSetup = select_camera_setup_for_trial(
+                    fullCameraSetup, cameraSetup,
+                    is_extrinsics_trial=extrinsicsTrial,
+                    scale_model=scaleModel)
+                cam2Use = select_cameras_for_trial(
+                    cam2sUse[fullCameraSetup], cam2sUse[cameraSetup],
+                    is_extrinsics_trial=extrinsicsTrial,
+                    scale_model=scaleModel)
                 
                 # Session specific intrinsic parameters
                 if 'subject2' in sessionName or 'subject3' in sessionName:
@@ -259,9 +291,14 @@ for count, sessionName in enumerate(sessionNames):
                               cam2Use=cam2Use, 
                               intrinsicsFinalFolder=intrinsicsFinalFolder,
                               extrinsicsTrial=extrinsicsTrial,
-                              markerDataFolderNameSuffix=cameraSetup,
+                              markerDataFolderNameSuffix=trialCameraSetup,
                               poseDetector=poseDetector,
                               resolutionPoseDetection=resolutionPoseDetection,
                               scaleModel=scaleModel, 
                               augmenter_model=augmenter_model,
                               dataDir=dataDir)
+
+                if scaleModel and cameraSetup != trialCameraSetup:
+                    copy_model_folder(dataDir, sessionName, poseDetector,
+                                      resolutionPoseDetection,
+                                      trialCameraSetup, cameraSetup)
