@@ -26,6 +26,11 @@ def load_mot(file, num_metadata_lines=10):
     return df, metadata
 
 
+def load_binary(file):
+    with open(file, 'rb') as f:
+        return f.read()
+
+
 def calc_rmse(series1, series2):
     return np.sqrt(((series1 - series2) ** 2).mean())
 
@@ -142,6 +147,105 @@ def test_main(trialName, t0, tf, syncVer, caplog):
     pd.testing.assert_index_equal(output_mot_df.columns, ref_mot_df.columns)
     compare_mot(output_mot_df, ref_mot_df, t0, tf)
 
-# TODO: calibration and neutral
+def test_main_calibration_and_neutral(caplog):
+    caplog.set_level(logging.INFO)
+
+    sessionName = 'sync_2-cameras'
+    dataDir = os.path.join(thisDir, 'opencap-test-data')
+    sessionDir = os.path.join(dataDir, 'Data', sessionName)
+    camera_param_paths = [
+        os.path.join(
+            sessionDir, 'Videos', camName, 'cameraIntrinsicsExtrinsics.pickle'
+        )
+        for camName in ('Cam0', 'Cam1')
+    ]
+    neutral_image_paths = [
+        os.path.join(sessionDir, 'NeutralPoseImages', f'{camName}_0.png')
+        for camName in ('Cam0', 'Cam1')
+    ]
+    neutral_pre_trc = os.path.join(
+        sessionDir,
+        'MarkerData',
+        'OpenPose_default',
+        'PreAugmentation',
+        'neutral.trc',
+    )
+    neutral_post_trc = os.path.join(
+        sessionDir,
+        'MarkerData',
+        'OpenPose_default',
+        'PostAugmentation_v0.3',
+        'neutral_LSTM.trc',
+    )
+    scaled_model_mot = os.path.join(
+        sessionDir,
+        'OpenSimData',
+        'OpenPose_default',
+        'Model',
+        'LaiUhlrich2022_scaled.mot',
+    )
+    neutral_visualizer_json = os.path.join(
+        sessionDir,
+        'VisualizerJsons',
+        'neutral',
+        'neutral.json',
+    )
+
+    ref_camera_params = {path: load_binary(path) for path in camera_param_paths}
+    ref_neutral_images = {path: load_binary(path) for path in neutral_image_paths}
+    ref_pre_trc_df, _ = load_trc(neutral_pre_trc)
+    ref_post_trc_df, _ = load_trc(neutral_post_trc)
+    ref_scaled_model_mot_df, _ = load_mot(scaled_model_mot, num_metadata_lines=6)
+    with open(neutral_visualizer_json, 'r') as f:
+        ref_neutral_visualizer_json = f.read()
+
+    main(
+        sessionName,
+        'calibration',
+        'calibration',
+        dataDir=dataDir,
+        extrinsicsTrial=True,
+    )
+    assert 'Load extrinsics for Cam0 - already existing' in caplog.text
+    assert 'Load extrinsics for Cam1 - already existing' in caplog.text
+    for path, ref_params in ref_camera_params.items():
+        assert load_binary(path) == ref_params
+
+    main(
+        sessionName,
+        'neutral',
+        'neutral',
+        dataDir=dataDir,
+        scaleModel=True,
+    )
+
+    for path, ref_image in ref_neutral_images.items():
+        assert load_binary(path) == ref_image
+
+    output_pre_trc_df, _ = load_trc(neutral_pre_trc)
+    pd.testing.assert_frame_equal(
+        output_pre_trc_df, ref_pre_trc_df, check_exact=False, atol=1e-3
+    )
+
+    output_post_trc_df, _ = load_trc(neutral_post_trc)
+    pd.testing.assert_frame_equal(
+        output_post_trc_df, ref_post_trc_df, check_exact=False, atol=1e-3
+    )
+
+    output_scaled_model_mot_df, _ = load_mot(
+        scaled_model_mot, num_metadata_lines=6
+    )
+    pd.testing.assert_index_equal(
+        output_scaled_model_mot_df.columns, ref_scaled_model_mot_df.columns
+    )
+    pd.testing.assert_frame_equal(
+        output_scaled_model_mot_df,
+        ref_scaled_model_mot_df,
+        check_exact=False,
+        atol=1e-6,
+    )
+
+    with open(neutral_visualizer_json, 'r') as f:
+        assert f.read() == ref_neutral_visualizer_json
 # TODO: > 2 cameras
 # TODO: augmenter versions

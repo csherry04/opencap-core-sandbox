@@ -127,7 +127,9 @@ def main(sessionName, trialName, trial_id, cameras_to_use=['all'],
     # This allows reprocessing trials with missing videos. If
     # overwriteCamerasToUse is True, the camera selection is the one
     # passed as an argument to main(). This is useful for local testing.
-    if 'camerastouse' in sessionMetadata and not overwriteCamerasToUse:
+    explicitCameraSelection = cameras_to_use != ['all']
+    if ('camerastouse' in sessionMetadata and not overwriteCamerasToUse
+            and not explicitCameraSelection):
         camerasToUse = sessionMetadata['camerastouse']
     else:
         camerasToUse = cameras_to_use
