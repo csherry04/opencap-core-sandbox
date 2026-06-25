@@ -420,6 +420,16 @@ def calcExtrinsics(imageFileName, CameraParams, CheckerBoardParams,
                 grayColor, CheckerBoardParams['dimensions'],  
                 cv2.CALIB_CB_ADAPTIVE_THRESH) 
 
+    corners2_from_sb = False
+    if not ret:
+        ret_sb, corners_sb, _ = cv2.findChessboardCornersSBWithMeta(
+            grayColor, CheckerBoardParams['dimensions'],
+            cv2.CALIB_CB_ACCURACY | cv2.CALIB_CB_LARGER)
+        if ret_sb:
+            ret = True
+            corners = corners_sb
+            corners2_from_sb = True
+
     # If desired number of corners can be detected then, 
     # refine the pixel coordinates and display 
     # them on the images of checker board 
@@ -429,8 +439,11 @@ def calcExtrinsics(imageFileName, CameraParams, CheckerBoardParams,
   
         # Refining pixel coordinates 
         # for given 2d points. 
-        corners2 = cv2.cornerSubPix( 
-            grayColor, corners, (11, 11), (-1, -1), criteria) / imageUpsampleFactor
+        if corners2_from_sb:
+            corners2 = corners / imageUpsampleFactor
+        else:
+            corners2 = cv2.cornerSubPix( 
+                grayColor, corners, (11, 11), (-1, -1), criteria) / imageUpsampleFactor
   
         twodpoints.append(corners2) 
   

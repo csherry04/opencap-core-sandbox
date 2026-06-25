@@ -31,6 +31,12 @@ def load_binary(file):
         return f.read()
 
 
+def load_trc_marker_names(file):
+    with open(file, 'r') as f:
+        marker_line = f.readlines()[3]
+    return [marker for marker in marker_line.strip().split('\t')[2:] if marker]
+
+
 def calc_rmse(series1, series2):
     return np.sqrt(((series1 - series2) ** 2).mean())
 
@@ -247,5 +253,89 @@ def test_main_calibration_and_neutral(caplog):
 
     with open(neutral_visualizer_json, 'r') as f:
         assert f.read() == ref_neutral_visualizer_json
+
+
+def test_lab_validation_static_downloaded_reference():
+    labValidationDir = os.path.join(repoDir, 'Data', 'LabValidation')
+    downloaded_static_trc = os.path.join(
+        labValidationDir,
+        'subject2',
+        'MarkerData',
+        'Video',
+        'OpenPose_default',
+        '5-cameras',
+        'static1_videoAndMocap.trc',
+    )
+    reproduced_static_trc = os.path.join(
+        labValidationDir,
+        'Data',
+        'subject2_Session0',
+        'MarkerData',
+        'OpenPose_default',
+        '5-cameras',
+        'PostAugmentation_v0.2',
+        'static1_LSTM.trc',
+    )
+    downloaded_scale_mot = os.path.join(
+        labValidationDir,
+        'subject2',
+        'OpenSimData',
+        'Video',
+        'OpenPose_default',
+        '5-cameras',
+        'Model',
+        'LaiArnoldModified2017_poly_withArms_weldHand_scaled.mot',
+    )
+    reproduced_scale_mot = os.path.join(
+        labValidationDir,
+        'Data',
+        'subject2_Session0',
+        'OpenSimData',
+        'OpenPose_default',
+        '5-cameras',
+        'Model',
+        'LaiUhlrich2022_scaled.mot',
+    )
+    required_files = [
+        downloaded_static_trc,
+        reproduced_static_trc,
+        downloaded_scale_mot,
+        reproduced_scale_mot,
+    ]
+    if not all(os.path.exists(path) for path in required_files):
+        pytest.skip('LabValidation downloaded dataset and reproduced outputs are unavailable.')
+
+    downloaded_marker_names = set(load_trc_marker_names(downloaded_static_trc))
+    reproduced_marker_names = set(load_trc_marker_names(reproduced_static_trc))
+    assert reproduced_marker_names.issubset(downloaded_marker_names)
+
+    reproduced_trc_df, _ = load_trc(reproduced_static_trc)
+    assert len(reproduced_trc_df) > 10
+
+    downloaded_scale_mot_df, _ = load_mot(
+        downloaded_scale_mot, num_metadata_lines=6
+    )
+    reproduced_scale_mot_df, _ = load_mot(
+        reproduced_scale_mot, num_metadata_lines=6
+    )
+    pd.testing.assert_index_equal(
+        reproduced_scale_mot_df.columns, downloaded_scale_mot_df.columns
+    )
+
+    joint_value_cols = [
+        col for col in downloaded_scale_mot_df.columns
+        if (
+            col.endswith('/value')
+            and 'ground_pelvis/pelvis_tx' not in col
+            and 'ground_pelvis/pelvis_ty' not in col
+            and 'ground_pelvis/pelvis_tz' not in col
+        )
+    ]
+    pd.testing.assert_frame_equal(
+        reproduced_scale_mot_df[joint_value_cols],
+        downloaded_scale_mot_df[joint_value_cols],
+        check_exact=False,
+        atol=0.25,
+    )
 # TODO: > 2 cameras
 # TODO: augmenter versions
