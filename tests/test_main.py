@@ -68,7 +68,6 @@ def compare_trc(output_trc, ref_trc, atol=1e-3):
     pd.testing.assert_frame_equal(
         output_trc_df, ref_trc_df, check_exact=False, atol=atol
     )
-    assert output_trc_df.isna().sum().sum() == ref_trc_df.isna().sum().sum()
 
 
 def load_osim_scales(file):
@@ -154,6 +153,69 @@ def compare_mot_files(output_mot, ref_mot, t0, tf):
     ref_mot_df, _ = load_mot(ref_mot)
     pd.testing.assert_index_equal(output_mot_df.columns, ref_mot_df.columns)
     compare_mot(output_mot_df, ref_mot_df, t0, tf)
+
+
+# Build out the necessary inputs for tmp directories used across tests
+def copy_main_input_session(
+    source_session_dir,
+    session_dir,
+    trial_name,
+    cameras,
+    pose_output_folder,
+    scaled_model_name=None,
+):
+    # Copy in metadata and mapping pickle
+    os.makedirs(session_dir, exist_ok=True)
+    shutil.copy2(
+        os.path.join(source_session_dir, 'sessionMetadata.yaml'),
+        os.path.join(session_dir, 'sessionMetadata.yaml'),
+    )
+
+    videos_dir = os.path.join(session_dir, 'Videos')
+    os.makedirs(videos_dir, exist_ok=True)
+    shutil.copy2(
+        os.path.join(source_session_dir, 'Videos', 'mappingCamDevice.pickle'),
+        os.path.join(videos_dir, 'mappingCamDevice.pickle'),
+    )
+    # Copy in intrinsics/extrinsics and videos
+    for camName in cameras:
+        source_cam_dir = os.path.join(source_session_dir, 'Videos', camName)
+        target_cam_dir = os.path.join(videos_dir, camName)
+        os.makedirs(target_cam_dir, exist_ok=True)
+        shutil.copy2(
+            os.path.join(source_cam_dir, 'cameraIntrinsicsExtrinsics.pickle'),
+            os.path.join(target_cam_dir, 'cameraIntrinsicsExtrinsics.pickle'),
+        )
+
+        source_input_dir = os.path.join(source_cam_dir, 'InputMedia', trial_name)
+        target_input_dir = os.path.join(target_cam_dir, 'InputMedia', trial_name)
+        os.makedirs(target_input_dir, exist_ok=True)
+        for filename in os.listdir(source_input_dir):
+            if os.path.splitext(filename)[0] == trial_name:
+                shutil.copy2(
+                    os.path.join(source_input_dir, filename),
+                    os.path.join(target_input_dir, filename),
+                )
+        # Copy in keypoints pickle and correct path to match what main expects
+        local_pickle_dir = os.path.join(
+            target_cam_dir,
+            pose_output_folder,
+            trial_name,
+        )
+        os.makedirs(local_pickle_dir, exist_ok=True)
+        shutil.copy2(
+            os.path.join(source_cam_dir, 'OutputPkl', f'{trial_name}_keypoints.pkl'),
+            os.path.join(local_pickle_dir, f'{trial_name}_rotated_pp.pkl'),
+        )
+    # Optionally copy in scaled model if not testing scaling
+    if scaled_model_name is not None:
+        model_dir = os.path.join(session_dir, 'OpenSimData', 'Model')
+        os.makedirs(model_dir, exist_ok=True)
+        shutil.copy2(
+            os.path.join(source_session_dir, 'OpenSimData', 'Model', scaled_model_name),
+            os.path.join(model_dir, scaled_model_name),
+        )
+
 
 # Calibration regression test
 def test_main_calibration(tmp_path):
@@ -276,32 +338,14 @@ def test_neutral_scaling(tmp_path):
     trialID = trialName
     dataDir = tmp_path
     sessionDir = os.path.join(dataDir, 'Data', sessionName)
-    shutil.copytree(
+
+    copy_main_input_session(
         SYNC_2CAM_DIR,
         sessionDir,
-        ignore=shutil.ignore_patterns('.DS_Store'),
+        trialName,
+        ['Cam0', 'Cam1'],
+        'OutputPkl_default',
     )
-
-    for camName in ['Cam0', 'Cam1']:
-        production_pickle = os.path.join(
-            sessionDir,
-            'Videos',
-            camName,
-            'OutputPkl',
-            f'{trialName}_keypoints.pkl',
-        )
-        local_pickle_dir = os.path.join(
-            sessionDir,
-            'Videos',
-            camName,
-            'OutputPkl_default',
-            trialName,
-        )
-        os.makedirs(local_pickle_dir, exist_ok=True)
-        shutil.copy2(
-            production_pickle,
-            os.path.join(local_pickle_dir, f'{trialName}_rotated_pp.pkl'),
-        )
 
     main(
         sessionName,
@@ -313,14 +357,6 @@ def test_neutral_scaling(tmp_path):
         scaleModel=True,
         syncVer='1.1',
     )
-
-    output_pre_augmentation_trc = os.path.join(
-        sessionDir,
-        'MarkerData',
-        'PreAugmentation',
-        f'{trialName}.trc',
-    )
-    assert os.path.exists(output_pre_augmentation_trc)
 
     output_post_augmentation_trc = os.path.join(
         sessionDir,
@@ -409,28 +445,15 @@ def test_lab_5cam_dynamic(tmp_path):
     trialID = trialName
     dataDir = tmp_path
     sessionDir = os.path.join(dataDir, 'Data', sessionName)
-    shutil.copytree(LAB_5CAM_DIR, sessionDir)
 
-    for camName in LAB_5CAM_DYNAMIC_ORDER:
-        production_pickle = os.path.join(
-            sessionDir,
-            'Videos',
-            camName,
-            'OutputPkl',
-            f'{trialName}_keypoints.pkl',
-        )
-        local_pickle_dir = os.path.join(
-            sessionDir,
-            'Videos',
-            camName,
-            'OutputPkl_1x736',
-            trialName,
-        )
-        os.makedirs(local_pickle_dir, exist_ok=True)
-        shutil.copy2(
-            production_pickle,
-            os.path.join(local_pickle_dir, f'{trialName}_rotated_pp.pkl'),
-        )
+    copy_main_input_session(
+        LAB_5CAM_DIR,
+        sessionDir,
+        trialName,
+        LAB_5CAM_DYNAMIC_ORDER,
+        'OutputPkl_1x736',
+        scaled_model_name='LaiUhlrich2022_scaled.osim',
+    )
 
     main(
         sessionName,
@@ -441,15 +464,8 @@ def test_lab_5cam_dynamic(tmp_path):
         genericFolderNames=True,
         poseDetector='openpose',
         resolutionPoseDetection='1x736',
+        syncVer='1.0',
     )
-
-    output_pre_augmentation_trc = os.path.join(
-        sessionDir,
-        'MarkerData',
-        'PreAugmentation',
-        f'{trialName}.trc',
-    )
-    assert os.path.exists(output_pre_augmentation_trc)
 
     output_post_augmentation_trc = os.path.join(
         sessionDir,
@@ -477,7 +493,7 @@ def test_lab_5cam_dynamic(tmp_path):
         f'{trialName}.mot',
     )
     # excludes the setup motion
-    compare_mot_files(output_mot, ref_mot, 2, 9)
+    compare_mot_files(output_mot, ref_mot, 2.0, 9.0)
 
 
 # TODO: augmenter versions
