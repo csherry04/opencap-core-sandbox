@@ -156,7 +156,7 @@ def compare_mot_files(output_mot, ref_mot, t0, tf):
 
 
 # Build out the necessary inputs for tmp directories used across tests
-def copy_main_input_session(
+def prepare_test_session(
     source_session_dir,
     session_dir,
     trial_name,
@@ -339,7 +339,7 @@ def test_neutral_scaling(tmp_path):
     dataDir = tmp_path
     sessionDir = os.path.join(dataDir, 'Data', sessionName)
 
-    copy_main_input_session(
+    prepare_test_session(
         SYNC_2CAM_DIR,
         sessionDir,
         trialName,
@@ -446,7 +446,7 @@ def test_lab_5cam_dynamic(tmp_path):
     dataDir = tmp_path
     sessionDir = os.path.join(dataDir, 'Data', sessionName)
 
-    copy_main_input_session(
+    prepare_test_session(
         LAB_5CAM_DIR,
         sessionDir,
         trialName,
