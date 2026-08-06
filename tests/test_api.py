@@ -3,6 +3,7 @@ import os
 import sys
 import pytest
 from unittest.mock import patch, Mock, mock_open
+from http.client import HTTPMessage
 
 thisDir = os.path.dirname(os.path.realpath(__file__))
 repoDir = os.path.abspath(os.path.join(thisDir,'../'))
@@ -80,7 +81,7 @@ def test_upload_timeout(mock_request, mock_file):
 @patch("urllib3.connectionpool.HTTPConnectionPool._get_conn")
 def test_success_after_retries(mock_get_conn):
     def make_response(status):
-        response = Mock(status=status, headers={})
+        response = Mock(status=status, msg=HTTPMessage(), headers={})
         response.stream.return_value = []
         response._original_response = None
         return response
