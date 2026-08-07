@@ -196,6 +196,7 @@ def prepare_test_session(
                     os.path.join(target_input_dir, filename),
                 )
         # Copy in keypoints pickle and correct path to match what main expects
+        # This uses the format returned by web-based downloads.
         local_pickle_dir = os.path.join(
             target_cam_dir,
             pose_output_folder,
@@ -212,7 +213,8 @@ def prepare_test_session(
                 source_keypoints,
                 os.path.join(local_pickle_dir, f'{trial_name}_rotated_pp.pkl'),
             )
-        # Different structure needed for keypoints in sync2cam
+        # This uses the structure returned by API-based downloads.
+        # Ensure the correct pose_output_folder is entered here depending on pose detector.
         else:
             shutil.copy2(
                 os.path.join(
