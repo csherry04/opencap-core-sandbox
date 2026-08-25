@@ -28,6 +28,8 @@ from utilsAPI import getAPIURL
 
 API_URL = getAPIURL()
 API_TOKEN = getToken()
+DEFAULT_REQUEST_TIMEOUT = (10, 10)
+UPLOAD_REQUEST_TIMEOUT = (10, 300)
 DEPTH_DB_LEVEL = 10
 DEPTH_DB_TRANSFORM = "vertical_delta_shuffle16"
 DEPTH_CONTAINER_MAGIC = b"OCDEPTHDB1\n"
@@ -94,16 +96,15 @@ def getMMposeDirectory(isDocker=False):
     return mmposeDirectory
 
 def loadCameraParameters(filename):
-    open_file = open(filename, "rb")
-    cameraParams = pickle.load(open_file)
-    
-    open_file.close()
+    with open(filename, "rb") as open_file:
+        cameraParams = pickle.load(open_file)
+
     return cameraParams
 
 def importMetadata(filePath):
-    myYamlFile = open(filePath)
-    parsedYamlFile = yaml.load(myYamlFile, Loader=yaml.FullLoader)
-    
+    with open(filePath) as myYamlFile:
+        parsedYamlFile = yaml.load(myYamlFile, Loader=yaml.FullLoader)
+
     return parsedYamlFile
 
 def download_file(url, file_name):
@@ -122,7 +123,8 @@ def uploadFileToS3(filePath):
         makeRequestWithRetry('POST',
                              r['url'],
                              data=r['fields'],
-                             files=files)
+                             files=files,
+                             timeout=UPLOAD_REQUEST_TIMEOUT)
 
     return r['fields']['key']
 
@@ -191,7 +193,8 @@ def _loadDepthFrames(metadata_path):
         raise ValueError("Unsupported depth frame byte count.")
 
     depth_path = os.path.join(os.path.dirname(metadata_path), meta.get("file", "depth.bin"))
-    blob = open(depth_path, "rb").read()
+    with open(depth_path, "rb") as f:
+        blob = f.read()
 
     if meta.get("frame_layout") == "length_prefixed":
         frames = []
@@ -499,9 +502,8 @@ def postCalibrationOptions(session_path,session_id,overwrite=False):
    
     if trial['meta'] is None or overwrite == True:
         calibOptionsJsonPath = os.path.join(session_path,'Videos','calibOptionSelections.json')
-        f = open(calibOptionsJsonPath)
-        calibOptionsJson = json.load(f)
-        f.close()
+        with open(calibOptionsJsonPath) as f:
+            calibOptionsJson = json.load(f)
         data = {
                 "meta":json.dumps({'calibration':calibOptionsJson})
             }
@@ -983,10 +985,8 @@ def changeSessionMetadata(session_ids,newMetaDict):
         existingMeta = session['meta']
         
         # Check if framerate is in metadata. If not, set to 60
-        if 'framerate' not in existingMeta:
-            framerate = 60
-        else:
-            framerate = existingMeta['framerate']
+        framerate = existingMeta.get('settings', {}).get(
+            'framerate', existingMeta.get('framerate', 60))
         if 'filterfrequency' in newMetaDict:
             if newMetaDict['filterfrequency'] != 'default':
                 if float(newMetaDict['filterfrequency']) > framerate/2:
@@ -1481,23 +1481,21 @@ def numpy2storage(labels, data, storage_file):
     assert data.shape[1] == len(labels), "# labels doesn't match columns"
     assert labels[0] == "time"
     
-    f = open(storage_file, 'w')
-    f.write('name %s\n' %storage_file)
-    f.write('datacolumns %d\n' %data.shape[1])
-    f.write('datarows %d\n' %data.shape[0])
-    f.write('range %f %f\n' %(np.min(data[:, 0]), np.max(data[:, 0])))
-    f.write('endheader \n')
-    
-    for i in range(len(labels)):
-        f.write('%s\t' %labels[i])
-    f.write('\n')
-    
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            f.write('%20.8f\t' %data[i, j])
+    with open(storage_file, 'w') as f:
+        f.write('name %s\n' %storage_file)
+        f.write('datacolumns %d\n' %data.shape[1])
+        f.write('datarows %d\n' %data.shape[0])
+        f.write('range %f %f\n' %(np.min(data[:, 0]), np.max(data[:, 0])))
+        f.write('endheader \n')
+
+        for i in range(len(labels)):
+            f.write('%s\t' %labels[i])
         f.write('\n')
-        
-    f.close() 
+
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                f.write('%20.8f\t' %data[i, j])
+            f.write('\n')
       
     
 def lowpassFilter(inputData, filtFreq, order=4):
@@ -1615,17 +1613,15 @@ def storage2numpy(storage_file, excess_header_entries=0):
         >>> data['ground_force_vy']
     """
     # What's the line number of the line containing 'endheader'?
-    f = open(storage_file, 'r')
-
-    header_line = False
-    for i, line in enumerate(f):
-        if header_line:
-            column_names = line.split()
-            break
-        if line.count('endheader') != 0:
-            line_number_of_line_containing_endheader = i + 1
-            header_line = True
-    f.close()
+    with open(storage_file, 'r') as f:
+        header_line = False
+        for i, line in enumerate(f):
+            if header_line:
+                column_names = line.split()
+                break
+            if line.count('endheader') != 0:
+                line_number_of_line_containing_endheader = i + 1
+                header_line = True
 
     # With this information, go get the data.
     if excess_header_entries == 0:
@@ -2089,7 +2085,8 @@ def postProcessedDuration(trial_url, duration):
 # utils for common HTTP requests
 def makeRequestWithRetry(method, url,
                          headers=None, data=None, params=None, files=None,
-                         retries=5, backoff_factor=1):
+                         retries=5, backoff_factor=1,
+                         timeout=DEFAULT_REQUEST_TIMEOUT):
     """
     Makes an HTTP request with retry logic and returns the Response object.
 
@@ -2102,6 +2099,8 @@ def makeRequestWithRetry(method, url,
         params (dict): URL query parameters.
         retries (int): Number of retry attempts.
         backoff_factor (float): Backoff factor for exponential delays.
+        timeout (float or tuple): Seconds to wait for connection/response
+            activity, as accepted by requests.Session().request().
 
     Returns:
         requests.Response: The response object for further processing.
@@ -2121,6 +2120,7 @@ def makeRequestWithRetry(method, url,
                                     headers=headers,
                                     data=data,
                                     params=params,
-                                    files=files)
+                                    files=files,
+                                    timeout=timeout)
     response.raise_for_status()
     return response
