@@ -27,8 +27,10 @@ saveIntrinsicsForDeployment = True
 
 deployedFolderNames = ['Deployed_720_60fps','Deployed'] # both folder names if want to keep the detailed folder
 
-cameraModel = "iPhoneTest"  
-videoType = ".mov" #can be .avi or other file formats
+# Set to None for iPhones on the server or provide a model name to use videos 
+# already on disk at <sessionDir>/<trialID>/<trialID><videoType>.
+cameraModelInput = None
+videoType = ".mov" # only used when cameraModelInput is set; .avi etc. also work
     
 # %% Paths to data folder for local testing.
 dataDir = os.path.join(getDataDirectory(),'Data')
@@ -63,7 +65,9 @@ if loadTrialInfo:
         
      
 # Compute average intrinsic values from multiple trials of same camera
-CamParamsAverage, CamParamList, intrinsicComparisons, cameraModel = computeAverageIntrinsics(sessionDir,trials,CheckerBoardParams,nImages=50,cameraModel=cameraModel,videoType=videoType)
+CamParamsAverage, CamParamList, intrinsicComparisons, cameraModel = \
+    computeAverageIntrinsics(sessionDir,trials,CheckerBoardParams,
+                             nImages=50,cameraModel=cameraModelInput,videoType=videoType)
 
 
 # Save intrinsics from first camera for deployement 
