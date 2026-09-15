@@ -194,32 +194,47 @@ def calcIntrinsics(folderName, CheckerBoardParams=None, filenames=['*.jpg'],
     return CamParams
 
 # %%
-def computeAverageIntrinsics(session_path,trialIDs,CheckerBoardParams,nImages=25,cameraModel= None,videoType=".mov"):
+def computeAverageIntrinsics(session_path,trialIDs,CheckerBoardParams,nImages=25,cameraModel=None,videoType=".mov"):
+    """Average camera intrinsics across multiple checkerboard trials.
+
+    If cameraModel is None, camera model and trial name are fetched
+    from the API and the video is downloaded if it's not local.
+
+    If cameraModel is given, each video must already exist at
+    <session_path>/<trial_id>/<trial_id><videoType>.
+    """
     CamParamList = []
     camModels = []
     trial_name = 'null'
     
     for trial_id in trialIDs:
+        trial = None
         if cameraModel is None:
-            resp = makeRequestWithRetry(
-                'GET', API_URL + "trials/{}/".format(trial_id),
-                headers={"Authorization": "Token {}".format(API_TOKEN)})
+            resp = makeRequestWithRetry('GET',
+                                    API_URL + "trials/{}/".format(trial_id),
+                                    headers = {"Authorization": "Token {}".format(API_TOKEN)})
             trial = resp.json()
             camModels.append(trial['videos'][0]['parameters']['model'])
             trial_name = trial['name']
+            if trial_name == 'null':
+                trial_name = trial_id
         else:
             camModels.append(cameraModel)
             trial_name = trial_id
         if trial_name == 'null':
             trial_name = trial_id
-        
+
         # Make directory (folder for trialname, intrinsics also saved there)
         video_dir = os.path.join(session_path,trial_name)
         os.makedirs(video_dir, exist_ok=True)
         video_path = os.path.join(video_dir,trial_name + videoType)
-        
+
         # Download video if not done
         if not os.path.exists(video_path):
+            if trial is None:
+                raise FileNotFoundError(
+                    f"No video at {video_path}. When cameraModel is specified, videos are "
+                    "not downloaded from the API and must already be on disk.")
             download_file(trial["videos"][0]["video"], video_path)
             
         if not os.path.exists(os.path.join(video_dir,'cameraIntrinsics.pickle')):
@@ -457,6 +472,7 @@ def calcExtrinsics(imageFileName, CameraParams, CheckerBoardParams,
     
     #  3D points real world coordinates. Assuming z=0
     objectp3d = generate3Dgrid(CheckerBoardParams)
+    detectedCheckerBoardParams = CheckerBoardParams
     
     # Load and resize image - remember calibration image res needs to be same as all processing
     image = cv2.imread(imageFileName)
@@ -516,16 +532,24 @@ def calcExtrinsics(imageFileName, CameraParams, CheckerBoardParams,
     # typical calibration videos.
     corners2_from_sb = False
     if not ret:
-        ret_sb, corners_sb, _ = cv2.findChessboardCornersSBWithMeta(
+        ret_sb, corners_sb, meta_sb = cv2.findChessboardCornersSBWithMeta(
             grayColor, CheckerBoardParams['dimensions'],
                 cv2.CALIB_CB_ACCURACY | cv2.CALIB_CB_LARGER | cv2.CALIB_CB_EXHAUSTIVE)
         if ret_sb:
+            detectedDimensions = meta_sb.shape[::-1]
+            checkerCopy = copy.copy(CheckerBoardParams)
+            checkerCopy['dimensions'] = detectedDimensions
+            detectedCheckerBoardParams = checkerCopy
+            objectp3d = generate3Dgrid(detectedCheckerBoardParams)
             ret = True
             corners, orderingSuccess, orderingError = ensureCornerOrdering(
-                grayColor, corners_sb, CheckerBoardParams['dimensions'],
+                grayColor, corners_sb, detectedCheckerBoardParams['dimensions'],
                 squareResolution=2)
             if orderingSuccess:
                 corners2_from_sb = True
+                if tuple(detectedDimensions) != tuple(CheckerBoardParams['dimensions']):
+                    print('Detected checkerboard dimensions {} instead of input dimensions {}.'.format(
+                        detectedDimensions, CheckerBoardParams['dimensions']))
             else:
                 print('Rejected SB checkerboard detection: ' + orderingError)
                 ret = False
@@ -550,7 +574,7 @@ def calcExtrinsics(imageFileName, CameraParams, CheckerBoardParams,
   
         # For testing: Draw and display the corners 
         # image = cv2.drawChessboardCorners(image,  
-        #                                  CheckerBoardParams['dimensions'],  
+        #                                  detectedCheckerBoardParams['dimensions'],
         #                                   corners2, ret) 
         # Draw small dots instead
         # Choose dot size based on size of squares in pixels
